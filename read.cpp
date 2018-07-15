@@ -7,6 +7,8 @@ extern "C" {
     #include <libavutil/avutil.h>
     #include <ao/ao.h>
 }
+    
+#define MAX_AUDIO_FRAME_SIZE 192000 
  
 void die(const char* message)
 {
@@ -14,11 +16,6 @@ void die(const char* message)
     exit(1);
 }
 
-void init_output_device()
-{
-
-}
- 
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
@@ -73,11 +70,6 @@ int main(int argc, char* argv[])
 
     ao_initialize(); 
     int driver = ao_default_driver_id();
- 
-    AVPacket dummy_packet;
-    av_read_frame(container, &dummy_packet);
-    
-    #define MAX_AUDIO_FRAME_SIZE 192000 
 
     AVPacket packet;
     int buffer_size = MAX_AUDIO_FRAME_SIZE;
@@ -89,6 +81,11 @@ int main(int argc, char* argv[])
     bool firstFrame = true;
     ao_device* device = NULL;
     while (1) {
+        // Read one packet into `packet`
+        if (av_read_frame(container, &packet) < 0) {
+            break;  // End of stream. Done decoding.
+        }
+
         if (firstFrame){
             ao_sample_format sample_format;
 
@@ -113,11 +110,6 @@ int main(int argc, char* argv[])
         }
  
         buffer_size = MAX_AUDIO_FRAME_SIZE;
- 
-        // Read one packet into `packet`
-        if (av_read_frame(container, &packet) < 0) {
-            break;  // End of stream. Done decoding.
-        }
  
         // Decodes from `packet` into the buffer
         if (avcodec_decode_audio3(codec_context, (int16_t*)buffer, &buffer_size, &packet) < 1) {
