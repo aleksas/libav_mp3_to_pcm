@@ -9,6 +9,8 @@ extern "C" {
     #include <libavutil/avutil.h>
     #include <ao/ao.h>
 }
+
+#include "ffmpegReader2.hpp"
     
 #define MAX_AUDIO_FRAME_SIZE 192000 
 
@@ -155,6 +157,10 @@ int main(int argc, char* argv[])
     // This call is necessarily done once in your app to initialize
     // libavformat to register all the muxers, demuxers and protocols.
     av_register_all();
+
+    //FFmpegFile fil(input_filename);
+    //unsigned char buff[1024 * 1024];
+    //bool decoded = fil.decode(buff, 5);
     
     // Now seek back to the beginning of the stream
     //av_seek_frame(container, stream_id, 0, AVSEEK_FLAG_ANY);
