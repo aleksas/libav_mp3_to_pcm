@@ -1,0 +1,10 @@
+{
+    "C_Cpp.intelliSenseEngineFallback": "Disabled",
+    "files.associations": {
+        "stdio.h": "c",
+        "avcodec.h": "c",
+        "avutil.h": "c",
+        "ao.h": "c",
+        "avformat.h": "c"
+    }
+}

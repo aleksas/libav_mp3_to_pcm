@@ -1,0 +1,21 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build avcodec_mp3_to_pcm",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-g", "read.cpp",
+                "-o", "avcodec_mp3_to_pcm",
+                "-lavformat", "-lavcodec", "-lavutil", "-lavutil", "-lao"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}
