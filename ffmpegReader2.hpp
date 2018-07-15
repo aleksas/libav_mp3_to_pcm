@@ -11,6 +11,7 @@
 #include <vector>
 #include <algorithm>
 #include <string>
+#include <iostream>
 
 extern "C" {
     #include <errno.h>
@@ -24,11 +25,11 @@ extern "C" {
 
 // Set non-zero to enable tracing of file information inspected while opening a file in FFmpegFile::FFmpegFile().
 // Make sure this is disabled before checking-in this file.
-#define TRACE_FILE_OPEN 0
+#define TRACE_FILE_OPEN 1
 
 // Set non-zero to enable tracing of FFmpegFile::decode() general processing (plus error reports).
 // Make sure this is disabled before checking-in this file.
-#define TRACE_DECODE_PROCESS 0
+#define TRACE_DECODE_PROCESS 1
 
 // Set non-zero to enable tracing of the first few bytes of each data block in the bitstream for each frame decoded. This
 // assumes a 4-byte big-endian byte count at the start of each data block, followed by that many bytes of data. There may be
@@ -709,7 +710,7 @@ namespace
 
               // Decode the frame just read. frameDecoded indicates whether a decoded frame was output.
               decodeAttempted = true;
-              error = avcodec_decode_video2(stream->_codecContext, stream->_avFrame, &frameDecoded, &_avPacket);
+              error = avcodec_decode_audio4(stream->_codecContext, stream->_avFrame, &frameDecoded, &_avPacket);
               if (error < 0) {
                 // Decode error. Abort attempt to read and decode frames.
                 setInternalError(error, "FFmpeg Reader failed to decode frame: ");
