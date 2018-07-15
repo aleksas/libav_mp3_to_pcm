@@ -10,7 +10,7 @@ extern "C" {
     #include <ao/ao.h>
 }
 
-#include "ffmpegReader2.hpp"
+#include "ffmpegReader.hpp"
     
 #define MAX_AUDIO_FRAME_SIZE 192000 
 
