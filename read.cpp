@@ -1,4 +1,6 @@
-// SOUCE: https://blinkingblip.wordpress.com/2011/10/08/decoding-and-playing-an-audio-stream-using-libavcodec-libavformat-and-libao/
+// REFERENCES:
+// http://ffmpeg.org/doxygen/trunk/doc_2examples_2decoding__encoding_8c-example.html
+// https://blinkingblip.wordpress.com/2011/10/08/decoding-and-playing-an-audio-stream-using-libavcodec-libavformat-and-libao/
 
 extern "C" {
     #include <stdio.h>
@@ -9,7 +11,133 @@ extern "C" {
 }
     
 #define MAX_AUDIO_FRAME_SIZE 192000 
- 
+
+#define INBUF_SIZE 4096
+#define AUDIO_INBUF_SIZE 20480
+#define AUDIO_REFILL_THRESH 4096
+
+/*
+ * Audio decoding.
+ */
+static void audio_decode_example(const char *filename)
+{
+    AVCodec *codec;
+    AVCodecContext *c= NULL;
+    int len;
+    FILE *f;
+    uint8_t inbuf[AUDIO_INBUF_SIZE + FF_INPUT_BUFFER_PADDING_SIZE];
+    AVPacket avpkt;
+    AVFrame *decoded_frame = NULL;
+
+    ao_initialize(); 
+    int driver = ao_default_driver_id();
+    bool firstFrame = true;
+    ao_device* device = NULL;
+
+    av_init_packet(&avpkt);
+
+    /* find the mpeg audio decoder */
+    codec = avcodec_find_decoder(AV_CODEC_ID_MP3);
+    if (!codec) {
+        fprintf(stderr, "Codec not found\n");
+        exit(1);
+    }
+
+    c = avcodec_alloc_context3(codec);
+    if (!c) {
+        fprintf(stderr, "Could not allocate audio codec context\n");
+        exit(1);
+    }
+
+    /* open it */
+    if (avcodec_open2(c, codec, NULL) < 0) {
+        fprintf(stderr, "Could not open codec\n");
+        exit(1);
+    }
+
+    f = fopen(filename, "rb");
+    if (!f) {
+        fprintf(stderr, "Could not open %s\n", filename);
+        exit(1);
+    }
+
+    /* decode until eof */
+    avpkt.data = inbuf;
+    avpkt.size = fread(inbuf, 1, AUDIO_INBUF_SIZE, f);
+
+    while (avpkt.size > 0) {
+        int got_frame = 0;
+
+        if (!decoded_frame) {
+            if (!(decoded_frame = av_frame_alloc())) {
+                fprintf(stderr, "Could not allocate audio frame\n");
+                exit(1);
+            }
+        } else
+            av_frame_unref(decoded_frame);
+
+        len = avcodec_decode_audio4(c, decoded_frame, &got_frame, &avpkt);
+        if (len < 0) {
+            fprintf(stderr, "Error while decoding\n");
+            exit(1);
+        }
+        if (got_frame) {
+            if (firstFrame){
+                ao_sample_format sample_format;
+
+                if (c->sample_fmt == AV_SAMPLE_FMT_U8) {
+                    sample_format.bits = 8;
+                } else if (c->sample_fmt == AV_SAMPLE_FMT_S16) {
+                    sample_format.bits = 16;
+                } else if (c->sample_fmt == AV_SAMPLE_FMT_S16P) {
+                    sample_format.bits = 16;
+                } else if (c->sample_fmt == AV_SAMPLE_FMT_S32) {
+                    sample_format.bits = 32;
+                }
+                
+                sample_format.channels = c->channels;
+                sample_format.rate = c->sample_rate;
+                sample_format.byte_format = AO_FMT_NATIVE;
+                sample_format.matrix = 0;
+
+                // To initalize libao for playback
+                device = ao_open_live(driver, &sample_format, NULL);
+                firstFrame = false;
+            }
+
+            /* if a frame has been decoded, output it */
+            int data_size = av_samples_get_buffer_size(NULL, c->channels,
+                                                       decoded_frame->nb_samples,
+                                                       c->sample_fmt, 1);
+
+            // Send the buffer contents to the audio device
+            ao_play(device, (char*)decoded_frame->data[0], data_size);
+        }
+        avpkt.size -= len;
+        avpkt.data += len;
+        avpkt.dts =
+        avpkt.pts = AV_NOPTS_VALUE;
+        if (avpkt.size < AUDIO_REFILL_THRESH) {
+            /* Refill the input buffer, to avoid trying to decode
+             * incomplete frames. Instead of this, one could also use
+             * a parser, or use a proper container format through
+             * libavformat. */
+            memmove(inbuf, avpkt.data, avpkt.size);
+            avpkt.data = inbuf;
+            len = fread(avpkt.data + avpkt.size, 1,
+                        AUDIO_INBUF_SIZE - avpkt.size, f);
+            if (len > 0)
+                avpkt.size += len;
+        }
+    }
+
+    fclose(f);
+
+    avcodec_close(c);
+    av_free(c);
+    av_frame_free(&decoded_frame);
+}
+
 void die(const char* message)
 {
     fprintf(stderr, "%s\n", message);
@@ -27,100 +155,11 @@ int main(int argc, char* argv[])
     // This call is necessarily done once in your app to initialize
     // libavformat to register all the muxers, demuxers and protocols.
     av_register_all();
- 
-    // A media container
-    AVFormatContext* container = 0;
- 
-    if (avformat_open_input(&container, input_filename, NULL, NULL) < 0) {
-        die("Could not open file");
-    }
- 
-    if (avformat_find_stream_info(container, NULL) < 0) {
-        die("Could not find file info");
-    }
- 
-    int stream_id = -1;
- 
-    // To find the first audio stream. This process may not be necessary
-    // if you can gurarantee that the container contains only the desired
-    // audio stream
-    int i;
-    for (i = 0; i < container->nb_streams; i++) {
-        if (container->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
-            stream_id = i;
-            break;
-        }
-    }
- 
-    if (stream_id == -1) {
-        die("Could not find an audio stream");
-    }
- 
-    // Extract some metadata
-    AVDictionary* metadata = container->metadata;
- 
-    // Find the apropriate codec and open it
-    AVCodecContext* codec_context = container->streams[stream_id]->codec;
- 
-    AVCodec* codec = avcodec_find_decoder(codec_context->codec_id);
- 
-    if (!avcodec_open2(codec_context, codec, NULL) < 0) {
-        die("Could not find open the needed codec");
-    }
-
-    ao_initialize(); 
-    int driver = ao_default_driver_id();
-
-    AVPacket packet;
-    int buffer_size = MAX_AUDIO_FRAME_SIZE;
-    int8_t buffer[MAX_AUDIO_FRAME_SIZE];
     
     // Now seek back to the beginning of the stream
     //av_seek_frame(container, stream_id, 0, AVSEEK_FLAG_ANY);
- 
-    bool firstFrame = true;
-    ao_device* device = NULL;
-    while (1) {
-        // Read one packet into `packet`
-        if (av_read_frame(container, &packet) < 0) {
-            break;  // End of stream. Done decoding.
-        }
 
-        if (firstFrame){
-            ao_sample_format sample_format;
-
-            if (codec_context->sample_fmt == AV_SAMPLE_FMT_U8) {
-                sample_format.bits = 8;
-            } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S16) {
-                sample_format.bits = 16;
-            } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S16P) {
-                sample_format.bits = 16;
-            } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S32) {
-                sample_format.bits = 32;
-            }
-            
-            sample_format.channels = codec_context->channels;
-            sample_format.rate = codec_context->sample_rate;
-            sample_format.byte_format = AO_FMT_NATIVE;
-            sample_format.matrix = 0;
-
-            // To initalize libao for playback
-            device = ao_open_live(driver, &sample_format, NULL);
-            firstFrame = false;
-        }
- 
-        buffer_size = MAX_AUDIO_FRAME_SIZE;
- 
-        // Decodes from `packet` into the buffer
-        if (avcodec_decode_audio3(codec_context, (int16_t*)buffer, &buffer_size, &packet) < 1) {
-            break;  // Error in decoding
-        }
- 
-        // Send the buffer contents to the audio device
-        ao_play(device, (char*)buffer, buffer_size);
-    }
- 
-    avformat_close_input(&container);
+    audio_decode_example(input_filename); 
  
     ao_shutdown();
  
