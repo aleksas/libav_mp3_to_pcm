@@ -13,6 +13,11 @@ void die(const char* message)
     fprintf(stderr, "%s\n", message);
     exit(1);
 }
+
+void init_output_device()
+{
+
+}
  
 int main(int argc, char* argv[])
 {
@@ -65,43 +70,47 @@ int main(int argc, char* argv[])
     if (!avcodec_open2(codec_context, codec, NULL) < 0) {
         die("Could not find open the needed codec");
     }
+
+    ao_initialize(); 
+    int driver = ao_default_driver_id();
  
     AVPacket dummy_packet;
     av_read_frame(container, &dummy_packet);
     
-    ao_sample_format sample_format;
-
-    if (codec_context->sample_fmt == AV_SAMPLE_FMT_U8) {
-        sample_format.bits = 8;
-    } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S16) {
-        sample_format.bits = 16;
-    } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S16P) {
-        sample_format.bits = 16;
-    } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S32) {
-        sample_format.bits = 32;
-    }
-    
-    sample_format.channels = codec_context->channels;
-    sample_format.rate = codec_context->sample_rate;
-    sample_format.byte_format = AO_FMT_NATIVE;
-    sample_format.matrix = 0;
-    
-    // Now seek back to the beginning of the stream
-    av_seek_frame(container, stream_id, 0, AVSEEK_FLAG_ANY);
-
-    // To initalize libao for playback
-    ao_initialize();
- 
-    int driver = ao_default_driver_id();
-    ao_device* device = ao_open_live(driver, &sample_format, NULL);
- 
     #define MAX_AUDIO_FRAME_SIZE 192000 
 
     AVPacket packet;
     int buffer_size = MAX_AUDIO_FRAME_SIZE;
     int8_t buffer[MAX_AUDIO_FRAME_SIZE];
+    
+    // Now seek back to the beginning of the stream
+    //av_seek_frame(container, stream_id, 0, AVSEEK_FLAG_ANY);
  
+    bool firstFrame = true;
+    ao_device* device = NULL;
     while (1) {
+        if (firstFrame){
+            ao_sample_format sample_format;
+
+            if (codec_context->sample_fmt == AV_SAMPLE_FMT_U8) {
+                sample_format.bits = 8;
+            } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S16) {
+                sample_format.bits = 16;
+            } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S16P) {
+                sample_format.bits = 16;
+            } else if (codec_context->sample_fmt == AV_SAMPLE_FMT_S32) {
+                sample_format.bits = 32;
+            }
+            
+            sample_format.channels = codec_context->channels;
+            sample_format.rate = codec_context->sample_rate;
+            sample_format.byte_format = AO_FMT_NATIVE;
+            sample_format.matrix = 0;
+
+            // To initalize libao for playback
+            device = ao_open_live(driver, &sample_format, NULL);
+            firstFrame = false;
+        }
  
         buffer_size = MAX_AUDIO_FRAME_SIZE;
  
