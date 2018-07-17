@@ -1,11 +1,12 @@
+// REFERENCE:
+// https://learn.foundry.com/nuke/developers/7.0/ndkreference/examples/ffmpegReader.cpp
 // Copyright (c) 2012 The Foundry Visionmongers Ltd.  All Rights Reserved.
 
 #ifdef _WIN32
   #include <io.h>
+  #define INT64_C(c) (c ## LL)
+  #define UINT64_C(c) (c ## ULL)
 #endif
-
-//#define INT64_C(c) (c ## LL)
-//#define UINT64_C(c) (c ## ULL)
 
 #include <memory>
 #include <vector>
@@ -18,18 +19,17 @@ extern "C" {
     #include <libavformat/avformat.h>
     #include <libavcodec/avcodec.h>
     #include <libavutil/opt.h>
-    //#include <libswscale/swscale.h>
     #include <libavutil/avutil.h>
     #include <libavutil/error.h>
 }
 
 // Set non-zero to enable tracing of file information inspected while opening a file in FFmpegFile::FFmpegFile().
 // Make sure this is disabled before checking-in this file.
-#define TRACE_FILE_OPEN 1
+#define TRACE_FILE_OPEN 0
 
 // Set non-zero to enable tracing of FFmpegFile::decode() general processing (plus error reports).
 // Make sure this is disabled before checking-in this file.
-#define TRACE_DECODE_PROCESS 1
+#define TRACE_DECODE_PROCESS 0
 
 // Set non-zero to enable tracing of the first few bytes of each data block in the bitstream for each frame decoded. This
 // assumes a 4-byte big-endian byte count at the start of each data block, followed by that many bytes of data. There may be
@@ -72,9 +72,9 @@ namespace
       int64_t AVPacket::*_timestampField; // Pointer to member of AVPacket from which timestamps are to be retrieved. Enables
                                           // fallback to using DTSs for a stream if PTSs turn out not to be available.
 
-      //int _width;
-      //int _height;  
-      //double _aspect;
+      AVSampleFormat _sampleFmt;
+      int _channels;
+      int _sampleRate;
 
       int _decodeNextFrameIn; // The 0-based index of the next frame to be fed into decode. Negative before any
                               // frames have been decoded or when we've just seeked but not yet found a relevant frame. Equal to
@@ -100,9 +100,9 @@ namespace
         , _frames(0)
         , _ptsSeen(false)
         , _timestampField(&AVPacket::pts)
-        //, _width(0)
-        //, _height(0)
-        //, _aspect(1.0)
+        , _sampleFmt(AV_SAMPLE_FMT_S16P)
+        , _channels(1)
+        , _sampleRate(44100)
         , _decodeNextFrameIn(-1)
         , _decodeNextFrameOut(-1)
         , _accumDecodeLatency(0)
@@ -427,30 +427,9 @@ namespace
           std::cout << "      Framerate unspecified, assuming 1 fps" << std::endl;
 #endif
 
-/*        stream->_width  = avstream->codec->width;
-        stream->_height = avstream->codec->height;
-#if TRACE_FILE_OPEN
-        std::cout << "      Image size=" << stream->_width << "x" << stream->_height << std::endl;
-#endif
-
-        // set aspect ratio
-        if (stream->_avstream->sample_aspect_ratio.num) {
-          stream->_aspect = av_q2d(stream->_avstream->sample_aspect_ratio);
-#if TRACE_FILE_OPEN
-          std::cout << "      Aspect ratio (from stream)=" << stream->_aspect << std::endl;
-#endif
-        }
-        else if (stream->_codecContext->sample_aspect_ratio.num) {
-          stream->_aspect = av_q2d(stream->_codecContext->sample_aspect_ratio);
-#if TRACE_FILE_OPEN
-          std::cout << "      Aspect ratio (from codec)=" << stream->_aspect << std::endl;
-#endif
-        }
-#if TRACE_FILE_OPEN
-        else
-          std::cout << "      Aspect ratio unspecified, assuming " << stream->_aspect << std::endl;
-#endif
-*/
+        stream->_sampleFmt = avstream->codec->sample_fmt;
+        stream->_channels = avstream->codec->channels;
+        stream->_sampleRate = avstream->codec->sample_rate;
 
         // set stream start time and numbers of frames
         stream->_startPTS = getStreamStartTime(*stream);
@@ -574,7 +553,7 @@ namespace
 
       // Loop until the desired frame has been decoded. May also break from within loop on failure conditions where the
       // desired frame will never be decoded.
-      bool hasPicture = false;
+      bool got_frame = false;
       do {
         bool decodeAttempted = false;
         int frameDecoded = 0;
@@ -762,7 +741,12 @@ namespace
 
 ////////////////
 
-            hasPicture = true;
+            /* if a frame has been decoded, output it */
+            int data_size = av_samples_get_buffer_size(NULL, stream->_channels,
+                                                       stream->_avFrame->nb_samples,
+                                                       stream->_sampleFmt, 1);
+
+            got_frame = true;
           }
 #if TRACE_DECODE_PROCESS
           else
@@ -853,22 +837,22 @@ namespace
         }
 
         av_free_packet(&_avPacket);
-      } while (!hasPicture);
+      } while (!got_frame);
 
 #if TRACE_DECODE_PROCESS
-      std::cout << "<-validPicture=" << hasPicture << " for frame " << desiredFrame << std::endl;
+      std::cout << "<-validPicture=" << got_frame << " for frame " << desiredFrame << std::endl;
 #endif
 
       // If read failed, reset the next frame expected out so that we seek and restart decode on next read attempt. Also free
       // the AVPacket, since it won't have been freed at the end of the above loop (we reach here by a break from the main
-      // loop when hasPicture is false).
-      if (!hasPicture) {
+      // loop when got_frame is false).
+      if (!got_frame) {
         if (_avPacket.size > 0)
           av_free_packet(&_avPacket);
         stream->_decodeNextFrameOut = -1;
       }
 
-      return hasPicture;
+      return got_frame;
     }
 
     // get stream information
