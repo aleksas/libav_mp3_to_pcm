@@ -380,7 +380,7 @@ namespace
     }
 
     // decode a single frame into the buffer thread safe
-    bool decode(unsigned char* buffer, unsigned frame, playback_init_callback init_callback, playback_play_callback play_callback, unsigned streamIdx = 0)
+    bool decode(unsigned char* buffer, unsigned frame, init_playback_callback init_playback, play_callback play, unsigned streamIdx = 0)
     {
       if (streamIdx >= _streams.size())
         return false;
@@ -580,7 +580,7 @@ namespace
                         break;
                 }
 
-                init_callback(bits, stream->_codecContext->channels, stream->_codecContext->sample_rate);
+                init_playback(bits, stream->_codecContext->channels, stream->_codecContext->sample_rate);
 
                 firstFrame = false;
             }
@@ -598,7 +598,7 @@ namespace
                                                        stream->_codecContext->sample_fmt, 1);
 
             //avcodec_fill_audio_frame(stream->_avFrame, stream->, PIX_FMT_RGB24, stream->_width, stream->_height);
-            play_callback((char*)stream->_avFrame->data[0], data_size);
+            play((char*)stream->_avFrame->data[0], data_size);
             hasPicture = true;
           }
 

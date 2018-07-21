@@ -16,10 +16,13 @@ extern "C" {
 #define AUDIO_INBUF_SIZE 20480
 #define AUDIO_REFILL_THRESH 4096
 
+typedef void (*init_playback_callback)(int bits, int channels, int sample_rate);
+typedef void (*play_callback)(char * buffer, int bufferSize);
+
 /*
  * Audio decoding.
  */
-static void audio_decode_example(const char *filename)
+static void audio_decode_example(const char *filename, init_playback_callback init_playback, play_callback play)
 {
     AVCodec *codec;
     AVCodecContext *c= NULL;
@@ -85,25 +88,20 @@ static void audio_decode_example(const char *filename)
         }
         if (got_frame) {
             if (firstFrame){
-                ao_sample_format sample_format;
+                int bits = -1;
 
                 if (c->sample_fmt == AV_SAMPLE_FMT_U8) {
-                    sample_format.bits = 8;
+                    bits = 8;
                 } else if (c->sample_fmt == AV_SAMPLE_FMT_S16) {
-                    sample_format.bits = 16;
+                    bits = 16;
                 } else if (c->sample_fmt == AV_SAMPLE_FMT_S16P) {
-                    sample_format.bits = 16;
+                    bits = 16;
                 } else if (c->sample_fmt == AV_SAMPLE_FMT_S32) {
-                    sample_format.bits = 32;
+                    bits = 32;
                 }
-                
-                sample_format.channels = c->channels;
-                sample_format.rate = c->sample_rate;
-                sample_format.byte_format = AO_FMT_NATIVE;
-                sample_format.matrix = 0;
 
-                // To initalize libao for playback
-                device = ao_open_live(driver, &sample_format, NULL);
+                init_playback(bits, c->channels, c->sample_rate);
+
                 firstFrame = false;
             }
 
@@ -112,8 +110,7 @@ static void audio_decode_example(const char *filename)
                                                        decoded_frame->nb_samples,
                                                        c->sample_fmt, 1);
 
-            // Send the buffer contents to the audio device
-            ao_play(device, (char*)decoded_frame->data[0], data_size);
+            play((char*)decoded_frame->data[0], data_size);
         }
         avpkt.size -= len;
         avpkt.data += len;

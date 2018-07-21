@@ -8,7 +8,7 @@ extern "C" {
 int driver = -1;
 ao_device* device = NULL;
 
-void init_playback(int bits, int channels, int sample_rate)
+void init(int bits, int channels, int sample_rate)
 {
     ao_sample_format sample_format;
     sample_format.channels = channels;
@@ -21,7 +21,7 @@ void init_playback(int bits, int channels, int sample_rate)
     device = ao_open_live(driver, &sample_format, NULL);
 }
 
-void play_playback(char * buffer, int bufferSize)
+void play(char * buffer, int bufferSize)
 {
     // Send the buffer contents to the audio device
     ao_play(device, buffer, bufferSize);
@@ -47,7 +47,7 @@ int main(int argc, char* argv[])
  
     av_register_all();
 
-    audio_decode_example(input_filename, &init_playback, &play_playback); 
+    audio_decode_example(input_filename, &init, &play); 
 /*
     FFmpegFile file(input_filename);
     unsigned char buffer[2400];
