@@ -7,8 +7,10 @@
   #include <io.h>
 #endif
 
-#define INT64_C(c) (c ## LL)
-#define UINT64_C(c) (c ## ULL)
+#ifndef INT64_C
+    #define INT64_C(c) (c ## LL)
+    #define UINT64_C(c) (c ## ULL)
+#endif
 
 extern "C" {
     #include <errno.h>
@@ -67,6 +69,8 @@ namespace
 
       int64_t _startPTS;     // PTS of the first frame in the stream
       int64_t _frames;       // video duration in frames
+      int64_t _samples;       // video duration in frames
+      int64_t _frame_size;       // video duration in frames
 
       bool _ptsSeen;                      // True if a read AVPacket has ever contained a valid PTS during this stream's decode,
                                           // indicating that this stream does contain PTSs.
@@ -266,6 +270,12 @@ namespace
       return frames;
     }
 
+    // Get the video stream duration in frames...
+    int64_t getStreamSamples(Stream& stream)
+    {
+        return getStreamFrames(stream) * stream._codecContext->frame_size;
+    }
+
   public:
 
     typedef std::auto_ptr<FFmpegFile> Ptr;
@@ -319,7 +329,7 @@ namespace
         stream->_avstream = avstream;
         stream->_codecContext = avstream->codec;
         stream->_codec = codec;
-        stream->_avFrame = avcodec_alloc_frame();
+        stream->_avFrame = av_frame_alloc();
 
         // If FPS is specified, record it. 
         // Otherwise assume 1 fps (default value).
@@ -342,6 +352,8 @@ namespace
         // set stream start time and numbers of frames
         stream->_startPTS = getStreamStartTime(*stream);
         stream->_frames   = getStreamFrames(*stream);
+        stream->_samples  = getStreamSamples(*stream);
+        stream->_frame_size = stream->_codecContext->frame_size;
           
         // save the stream
         _streams.push_back(stream);
@@ -379,7 +391,24 @@ namespace
       return _streams.size();
     }
 
-    bool decode(unsigned frame, bool &initPlayback, init_playback_callback init_playback, play_callback play, void * data, unsigned streamIdx = 0)
+    bool decodeSamples(int64_t firstSample, int64_t lastSample, init_playback_callback init_playback, play_callback play, void * data, unsigned streamIdx = 0)
+    {
+        Stream* stream = _streams[streamIdx];
+
+        if (streamIdx >= _streams.size()) return false;
+        if (firstSample < 0) return false;
+        if (lastSample >= stream->_samples) return false;
+
+        int firstFrame = floor((double)firstSample / stream->_frame_size);
+        int lastFrame = floor((double)lastSample / stream->_frame_size);
+
+        for (int f = firstFrame; f <= lastFrame; f++)
+        {
+            decode(f, init_playback, play, data, streamIdx);
+        }
+    }
+
+    bool decode(unsigned frame, init_playback_callback init_playback, play_callback play, void * data, unsigned streamIdx = 0)
     {
       if (streamIdx >= _streams.size())
         return false;
@@ -561,7 +590,8 @@ namespace
 
         // If a frame was decoded, ...
         if (frameDecoded) {
-            if (initPlayback) {
+
+            {
                 int bits = -1;
 
                 switch(stream->_codecContext->sample_fmt){
@@ -580,8 +610,6 @@ namespace
                 }
 
                 init_playback(bits, stream->_codecContext->channels, stream->_codecContext->sample_rate, data);
-
-                initPlayback = false;
             }
 
           // Now that we have had a frame decoded, we know that seek landed at a valid place to start decode. Any decode
@@ -595,13 +623,6 @@ namespace
             int data_size = av_samples_get_buffer_size(NULL, stream->_codecContext->channels,
                                                        stream->_avFrame->nb_samples,
                                                        stream->_codecContext->sample_fmt, 1);
-
-            /*avcodec_fill_audio_frame(
-                                stream->_avFrame,
-                                stream->_codecContext->channels,
-                                stream->_codecContext->sample_fmt,
-                                buf,
-                                2400, 1);*/
             
             play((char*)stream->_avFrame->data[0], data_size, data);
             hasPicture = true;
@@ -697,7 +718,7 @@ namespace
         // get the stream
         Stream* stream = _streams[streamIdx];
         frames = stream->_frames;
-        samples = frames * stream->_codecContext->sample_rate;
+        samples = stream->_samples;
 
         return true;
     }

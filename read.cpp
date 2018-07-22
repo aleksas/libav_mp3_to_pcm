@@ -5,32 +5,44 @@ extern "C" {
     #include <stdio.h>
 }
 
-int driver = 0;
-ao_device* device = NULL;
-
-void init(int bits, int channels, int sample_rate, void * data)
-{
-    ao_sample_format sample_format;
-    sample_format.channels = channels;
-    sample_format.rate = sample_rate;
-    sample_format.bits = bits;
-    sample_format.byte_format = AO_FMT_NATIVE;
-    sample_format.matrix = 0;
-
-    // To initalize libao for playback
-    device = ao_open_live(driver, &sample_format, NULL);
-}
-
-void play(char * buffer, int bufferSize, void * data)
-{
-    // Send the buffer contents to the audio device
-    ao_play(device, buffer, bufferSize);
-}
+typedef struct OutputHandle_ {
+    int driver;
+    ao_device* device;
+} OutputHandle;
 
 void die(const char* message)
 {
     fprintf(stderr, "%s\n", message);
     exit(1);
+}
+
+void init(int bits, int channels, int sample_rate, void * data)
+{
+    OutputHandle * pHandle = (OutputHandle *) data;
+    if (!data) die("data null pointer passed to init.");
+
+    if (!pHandle->device)
+    {
+        ao_sample_format sample_format;
+        sample_format.channels = channels;
+        sample_format.rate = sample_rate;
+        sample_format.bits = bits;
+        sample_format.byte_format = AO_FMT_NATIVE;
+        sample_format.matrix = 0;
+
+        // To initalize libao for playback
+        pHandle->device = ao_open_live(pHandle->driver, &sample_format, NULL);
+        if (!pHandle->device) die("Could not initialize output device");
+    }
+}
+
+void play(char * buffer, int bufferSize, void * data)
+{
+    OutputHandle * pHandle = (OutputHandle *) data;
+    if (!data) die("data null pointer passed to play.");
+
+    // Send the buffer contents to the audio device
+    ao_play(pHandle->device, buffer, bufferSize);
 }
 
 int main(int argc, char* argv[])
@@ -41,24 +53,41 @@ int main(int argc, char* argv[])
  
     const char* input_filename = argv[1];
 
+    OutputHandle handle = {0};
 
     ao_initialize(); 
-    driver = ao_default_driver_id();
+    handle.driver = ao_default_driver_id();
  
     av_register_all();
 
-    // Just play all samples
-    //audio_decode_example(input_filename, &init, &play, NULL); 
+    int scenario = 3;
 
-    /// Use seek:
-    FFmpegFile file(input_filename);
+    switch (scenario){
+        case 1:
+            audio_decode_example(input_filename, &init, &play, &handle); 
+            break;
+        case 2:
+            {
+                FFmpegFile file(input_filename);
+                int64_t frames, samples;
+                file.info(frames, samples);
 
-    int64_t frames, samples;
-    file.info(frames, samples);
-    bool initPlayback = true;
-    int i = 2700;
-    while (file.decode(i++, initPlayback, &init, &play, NULL))
-    {}
+                int frame = 2700;
+                while (file.decode(frame++, &init, &play, &handle))
+                {}
+            }
+            break;
+        case 3:
+            {
+                FFmpegFile file(input_filename);
+
+                int64_t frames, samples;
+                file.info(frames, samples);
+                file.decodeSamples(3200000, samples - 1, &init, &play, &handle);
+            }
+            break;
+    }
+    
 
     ao_shutdown();
   
