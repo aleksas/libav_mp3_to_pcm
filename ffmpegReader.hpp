@@ -126,14 +126,14 @@ namespace
 
       int64_t frameToPts(int frame) const
       {
-        return _startPTS + (int64_t(frame) * _fpsDen *  _avstream->time_base.den) / 
-                                    (int64_t(_fpsNum) * _avstream->time_base.num);
+        return _startPTS + ceil((double)(int64_t(frame) * _codecContext->frame_size *  _avstream->time_base.den) / 
+                                    (int64_t(_codecContext->sample_rate) * _avstream->time_base.num));
       }
 
       int ptsToFrame(int64_t pts) const 
       {
-        return (int64_t(pts - _startPTS) * _avstream->time_base.num *  _fpsNum) / 
-                                  (int64_t(_avstream->time_base.den) * _fpsDen);
+        return ceil((double)(int64_t(pts - _startPTS) * _avstream->time_base.num *  _codecContext->sample_rate) / 
+                                  (int64_t(_avstream->time_base.den) * _codecContext->frame_size));
       }
 
       // Return the number of input frames needed by this stream's codec before it can produce output. We expect to have to
@@ -234,8 +234,8 @@ namespace
       // durations in AVFormatContext are represented in units of AV_TIME_BASE (1000000), so may be imprecise, leading to
       // loss of an otherwise-available frame.
       if (!frames) {
-        frames = (int64_t(stream._avstream->duration) * stream._avstream->time_base.num  * stream._fpsNum) /
-                                               (int64_t(stream._avstream->time_base.den) * stream._fpsDen);
+        frames = ceil((double)(int64_t(stream._avstream->duration) * stream._avstream->time_base.num  * stream._codecContext->sample_rate) /
+                                               (int64_t(stream._avstream->time_base.den) * stream._codecContext->frame_size));
       }
 
       // If the number of frames is still unknown, attempt to measure it from the last frame PTS for the stream in the
@@ -379,8 +379,7 @@ namespace
       return _streams.size();
     }
 
-    // decode a single frame into the buffer thread safe
-    bool decode(unsigned char* buffer, unsigned frame, init_playback_callback init_playback, play_callback play, unsigned streamIdx = 0)
+    bool decode(unsigned frame, bool &initPlayback, init_playback_callback init_playback, play_callback play, void * data, unsigned streamIdx = 0)
     {
       if (streamIdx >= _streams.size())
         return false;
@@ -389,7 +388,7 @@ namespace
       Stream* stream = _streams[streamIdx];
 
       // Translate from the 1-based frames expected by Nuke to 0-based frame offsets for use in the rest of this code.
-      int desiredFrame = frame - 1;
+      int desiredFrame = frame;
 
       // Early-out if out-of-range frame requested.
       if (desiredFrame < 0 || desiredFrame >= stream->_frames)
@@ -448,8 +447,9 @@ namespace
       }
 
       av_init_packet(&_avPacket);
-      _avPacket.data = buffer;
-      _avPacket.size = 2400;
+
+      //_avPacket.data = buf;
+      //_avPacket.size = 2400;
 
       // Loop until the desired frame has been decoded. May also break from within loop on failure conditions where the
       // desired frame will never be decoded.
@@ -457,7 +457,6 @@ namespace
       do {
         bool decodeAttempted = false;
         int frameDecoded = 0;
-        bool firstFrame = true;
 
         // If the next frame to decode is within range of frames (or negative implying invalid; we've just seeked), read
         // a new frame from the source file and feed it to the decoder if it's for the video stream.
@@ -562,7 +561,7 @@ namespace
 
         // If a frame was decoded, ...
         if (frameDecoded) {
-            if (firstFrame) {
+            if (initPlayback) {
                 int bits = -1;
 
                 switch(stream->_codecContext->sample_fmt){
@@ -580,9 +579,9 @@ namespace
                         break;
                 }
 
-                init_playback(bits, stream->_codecContext->channels, stream->_codecContext->sample_rate);
+                init_playback(bits, stream->_codecContext->channels, stream->_codecContext->sample_rate, data);
 
-                firstFrame = false;
+                initPlayback = false;
             }
 
           // Now that we have had a frame decoded, we know that seek landed at a valid place to start decode. Any decode
@@ -597,8 +596,14 @@ namespace
                                                        stream->_avFrame->nb_samples,
                                                        stream->_codecContext->sample_fmt, 1);
 
-            //avcodec_fill_audio_frame(stream->_avFrame, stream->, PIX_FMT_RGB24, stream->_width, stream->_height);
-            play((char*)stream->_avFrame->data[0], data_size);
+            /*avcodec_fill_audio_frame(
+                                stream->_avFrame,
+                                stream->_codecContext->channels,
+                                stream->_codecContext->sample_fmt,
+                                buf,
+                                2400, 1);*/
+            
+            play((char*)stream->_avFrame->data[0], data_size, data);
             hasPicture = true;
           }
 
@@ -684,16 +689,17 @@ namespace
     }
 
     // get stream information
-    bool info( int & frames,
-               unsigned streamIdx = 0)
+    bool info( int64_t & frames, int64_t & samples, unsigned streamIdx = 0)
     {
-      if (streamIdx >= _streams.size())
-        return false;
+        if (streamIdx >= _streams.size())
+            return false;
 
-      // get the stream
-      Stream* stream = _streams[streamIdx];
+        // get the stream
+        Stream* stream = _streams[streamIdx];
         frames = stream->_frames;
-      return true;
+        samples = frames * stream->_codecContext->sample_rate;
+
+        return true;
     }
     
   };

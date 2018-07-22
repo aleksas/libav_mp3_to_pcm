@@ -16,13 +16,13 @@ extern "C" {
 #define AUDIO_INBUF_SIZE 20480
 #define AUDIO_REFILL_THRESH 4096
 
-typedef void (*init_playback_callback)(int bits, int channels, int sample_rate);
-typedef void (*play_callback)(char * buffer, int bufferSize);
+typedef void (*init_playback_callback)(int bits, int channels, int sample_rate, void * data);
+typedef void (*play_callback)(char * buffer, int bufferSize, void * data);
 
 /*
  * Audio decoding.
  */
-static void audio_decode_example(const char *filename, init_playback_callback init_playback, play_callback play)
+static void audio_decode_example(const char *filename, init_playback_callback init_playback, play_callback play, void * data)
 {
     AVCodec *codec;
     AVCodecContext *c= NULL;
@@ -100,7 +100,7 @@ static void audio_decode_example(const char *filename, init_playback_callback in
                     bits = 32;
                 }
 
-                init_playback(bits, c->channels, c->sample_rate);
+                init_playback(bits, c->channels, c->sample_rate, data);
 
                 firstFrame = false;
             }
@@ -110,7 +110,7 @@ static void audio_decode_example(const char *filename, init_playback_callback in
                                                        decoded_frame->nb_samples,
                                                        c->sample_fmt, 1);
 
-            play((char*)decoded_frame->data[0], data_size);
+            play((char*)decoded_frame->data[0], data_size, data);
         }
         avpkt.size -= len;
         avpkt.data += len;

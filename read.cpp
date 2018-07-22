@@ -5,10 +5,10 @@ extern "C" {
     #include <stdio.h>
 }
 
-int driver = -1;
+int driver = 0;
 ao_device* device = NULL;
 
-void init(int bits, int channels, int sample_rate)
+void init(int bits, int channels, int sample_rate, void * data)
 {
     ao_sample_format sample_format;
     sample_format.channels = channels;
@@ -21,7 +21,7 @@ void init(int bits, int channels, int sample_rate)
     device = ao_open_live(driver, &sample_format, NULL);
 }
 
-void play(char * buffer, int bufferSize)
+void play(char * buffer, int bufferSize, void * data)
 {
     // Send the buffer contents to the audio device
     ao_play(device, buffer, bufferSize);
@@ -47,18 +47,19 @@ int main(int argc, char* argv[])
  
     av_register_all();
 
-    audio_decode_example(input_filename, &init, &play); 
-/*
-    FFmpegFile file(input_filename);
-    unsigned char buffer[2400];
+    // Just play all samples
+    //audio_decode_example(input_filename, &init, &play, NULL); 
 
-    int frames;
-    file.info(frames);
-    for (int i = 1; i <= frames; i++)
-    {
-        file.decode(buffer, i, &init_playback, &play_playback);
-    }
-*/
+    /// Use seek:
+    FFmpegFile file(input_filename);
+
+    int64_t frames, samples;
+    file.info(frames, samples);
+    bool initPlayback = true;
+    int i = 2700;
+    while (file.decode(i++, initPlayback, &init, &play, NULL))
+    {}
+
     ao_shutdown();
   
     fprintf(stdout, "Done playing. Exiting...");
