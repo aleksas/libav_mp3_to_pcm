@@ -88,7 +88,9 @@ int main(int argc, char* argv[])
 
                 int64_t frames, samples;
                 file.info(frames, samples);
-                file.decodeSamples(1748982, 1806075, &init, &play, &handle);
+                file.decodeSamples(1010000, 1080000, &init, &play, &handle);
+                file.decodeSamples(290000, 380000, &init, &play, &handle);
+                file.decodeSamples(95000, 170000, &init, &play, &handle);
             }
             break;
     }

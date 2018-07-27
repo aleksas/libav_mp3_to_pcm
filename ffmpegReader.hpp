@@ -1,7 +1,7 @@
 // Copyright (c) 2012 The Foundry Visionmongers Ltd.  All Rights Reserved.
 // REFERENCE:
 // https://learn.foundry.com/nuke/developers/7.0/ndkreference/examples/ffmpegReader.cpp
-
+// https://stackoverflow.com/questions/19785254/play-a-video-from-memorystream-using-ffmpeg
 
 #ifdef _WIN32
   #include <io.h>
@@ -457,9 +457,9 @@ namespace
         if (lastSample >= stream->_samples) return false;
 
         int firstFrame = floor((double)firstSample / stream->_frame_size);
-        int lastFrame = floor((double)lastSample / stream->_frame_size);
+        int lastFrame = ceil((double)lastSample / stream->_frame_size);
         int _ltrim = (firstSample - firstFrame * stream->_frame_size) * stream->_bitsPerSample / 8;
-        int _rtrim = (lastSample - lastFrame * stream->_frame_size) * stream->_bitsPerSample / 8;
+        int _rtrim = (lastFrame * stream->_frame_size - lastSample) * stream->_bitsPerSample / 8;
 
         for (int f = firstFrame; f < lastFrame ; f++)
         {
