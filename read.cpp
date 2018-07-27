@@ -12,6 +12,10 @@ extern "C" {
 typedef struct OutputHandle_ {
     int driver;
     ao_device* device;
+
+    // Alt scenario when we save audio to mem instead of playing it
+    char * buffer;
+    uint64_t signal_offset;
 } OutputHandle;
 
 void die(const char* message)
@@ -36,7 +40,6 @@ void init(int bits, int channels, int sample_rate, void * data)
 
         // To initalize libao for playback
         pHandle->device = ao_open_live(pHandle->driver, &sample_format, NULL);
-        //pHandle->device = ao_open_file(pHandle->driver, "out.wav", true, &sample_format, NULL);
         if (!pHandle->device) die("Could not initialize output device");
     }
 }
@@ -45,6 +48,11 @@ void play(char * buffer, int bufferSize, void * data)
 {
     OutputHandle * pHandle = (OutputHandle *) data;
     if (!data) die("data null pointer passed to play.");
+
+    pHandle->buffer = (char*) realloc(pHandle->buffer, pHandle->signal_offset + bufferSize);
+
+    memcpy(pHandle->buffer + pHandle->signal_offset, buffer, bufferSize);
+    pHandle->signal_offset += bufferSize;
 
     // Send the buffer contents to the audio device
     ao_play(pHandle->device, buffer, bufferSize);
@@ -74,8 +82,9 @@ int main(int argc, char* argv[])
         case 2:
             {
                 FFmpegFile file(input_filename);
-                int64_t frames, samples;
-                file.info(frames, samples);
+                
+                int64_t frames, samplesPerFrame, bitsPerSample;
+                file.info(frames, samplesPerFrame, bitsPerSample);
 
                 int frame = 2700;
                 while (file.decode(frame++, 0, 0, &init, &play, &handle))
@@ -86,15 +95,22 @@ int main(int argc, char* argv[])
             {
                 FFmpegFile file(input_filename);
 
-                int64_t frames, samples;
-                file.info(frames, samples);
+                int64_t frames, samplesPerFrame, bitsPerSample, Bps;
+                file.info(frames, samplesPerFrame, bitsPerSample);
+                Bps = bitsPerSample / 8;
+
+                handle.signal_offset = 0;
+
                 file.decodeSamples(1010000, 1080000, &init, &play, &handle);
                 file.decodeSamples(290000, 380000, &init, &play, &handle);
                 file.decodeSamples(95000, 170000, &init, &play, &handle);
+
+                play((char *) handle.buffer, handle.signal_offset, &handle);
             }
             break;
     }
     
+    free(handle.buffer);
 
     ao_shutdown();
   

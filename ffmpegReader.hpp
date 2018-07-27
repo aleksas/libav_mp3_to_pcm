@@ -766,7 +766,7 @@ namespace
     }
 
     // get stream information
-    bool info( int64_t & frames, int64_t & samples, unsigned streamIdx = 0)
+    bool info( int64_t & frames, int64_t & samplesPerFrame, int64_t & bitsPerSample, unsigned streamIdx = 0)
     {
         if (streamIdx >= _streams.size())
             return false;
@@ -774,7 +774,8 @@ namespace
         // get the stream
         Stream* stream = _streams[streamIdx];
         frames = stream->_frames;
-        samples = stream->_samples;
+        samplesPerFrame = stream->_frame_size;
+        bitsPerSample = stream->_bitsPerSample;
 
         return true;
     }
