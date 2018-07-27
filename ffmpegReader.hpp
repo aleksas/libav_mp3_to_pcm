@@ -19,6 +19,7 @@ extern "C" {
     #include <libavutil/opt.h>
     #include <libavutil/avutil.h>
     #include <libavutil/error.h>
+    #include "libswresample/swresample.h"
 }
 
 #include <vector>
@@ -63,6 +64,8 @@ namespace
       AVCodecContext* _codecContext; // video codec context
       AVCodec* _codec;
       AVFrame* _avFrame;             // decoding frame
+      SwrContext *_swr;
+      uint8_t * _swr_buffer;
 
       int _fpsNum;
       int _fpsDen;
@@ -70,6 +73,7 @@ namespace
       int64_t _startPTS;     // PTS of the first frame in the stream
       int64_t _frames;       // video duration in frames
       int64_t _samples;       // video duration in frames
+      int64_t _bitsPerSample;       // video duration in frames
       int64_t _frame_size;       // video duration in frames
 
       bool _ptsSeen;                      // True if a read AVPacket has ever contained a valid PTS during this stream's decode,
@@ -97,12 +101,16 @@ namespace
         : _idx(0)
         , _avstream(NULL)
         , _codecContext(NULL)
+        , _swr(NULL)
+        , _swr_buffer(NULL)
         , _codec(NULL)
         , _avFrame(NULL)
         , _fpsNum(1)
         , _fpsDen(1)
         , _startPTS(0)
         , _frames(0)
+        , _samples(0)
+        , _bitsPerSample(0)
         , _ptsSeen(false)
         , _timestampField(&AVPacket::pts)
         , _width(0)
@@ -111,7 +119,8 @@ namespace
         , _decodeNextFrameIn(-1)
         , _decodeNextFrameOut(-1)
         , _accumDecodeLatency(0)
-      {}
+      {        
+      }
 
       ~Stream()
       {
@@ -120,7 +129,15 @@ namespace
          av_free(_avFrame);
 
         if (_codecContext)
-          avcodec_close(_codecContext);       
+          avcodec_close(_codecContext);  
+
+        if (_swr)
+          swr_free(&_swr);    
+
+        if (_swr_buffer){
+          free(_swr_buffer); 
+          _swr_buffer = NULL;
+          }    
       }
 
       static void destroy(Stream* s)
@@ -130,8 +147,11 @@ namespace
 
       int64_t frameToPts(int frame) const
       {
-        return _startPTS + ceil((double)(int64_t(frame) * _codecContext->frame_size *  _avstream->time_base.den) / 
+          int64_t pts = _startPTS;
+        pts += ceil((double)(int64_t(frame) * _codecContext->frame_size *  _avstream->time_base.den) / 
                                     (int64_t(_codecContext->sample_rate) * _avstream->time_base.num));
+
+        return pts;
       }
 
       int ptsToFrame(int64_t pts) const 
@@ -276,6 +296,33 @@ namespace
         return getStreamFrames(stream) * stream._codecContext->frame_size;
     }
 
+    int getBitsPerSample(AVSampleFormat sfmt)
+    {
+      int bits = -1;
+
+      switch(sfmt){
+          case AV_SAMPLE_FMT_U8:
+          case AV_SAMPLE_FMT_U8P:
+              bits = 8;
+              break;
+          case AV_SAMPLE_FMT_S16:
+          case AV_SAMPLE_FMT_S16P:
+              bits = 16;
+              break;
+          case AV_SAMPLE_FMT_S32:
+          case AV_SAMPLE_FMT_S32P:
+              bits = 32;
+              break;
+          case AV_SAMPLE_FMT_FLT:
+          case AV_SAMPLE_FMT_FLTP:
+              bits = 16;
+              break;
+      }
+
+      return bits;
+
+    }
+
   public:
 
     typedef std::auto_ptr<FFmpegFile> Ptr;
@@ -331,6 +378,15 @@ namespace
         stream->_codec = codec;
         stream->_avFrame = av_frame_alloc();
 
+        stream->_swr = swr_alloc();
+        av_opt_set_int(stream->_swr, "in_channel_layout",  avstream->codec->channel_layout, 0);
+        av_opt_set_int(stream->_swr, "out_channel_layout", avstream->codec->channel_layout,  0);
+        av_opt_set_int(stream->_swr, "in_sample_rate",     avstream->codec->sample_rate, 0);
+        av_opt_set_int(stream->_swr, "out_sample_rate",    avstream->codec->sample_rate, 0);
+        av_opt_set_sample_fmt(stream->_swr, "in_sample_fmt",  AV_SAMPLE_FMT_FLTP, 0);
+        av_opt_set_sample_fmt(stream->_swr, "out_sample_fmt", AV_SAMPLE_FMT_S16,  0);
+        swr_init(stream->_swr);
+
         // If FPS is specified, record it. 
         // Otherwise assume 1 fps (default value).
         if ( avstream->r_frame_rate.num != 0 &&  avstream->r_frame_rate.den != 0 ) {
@@ -353,6 +409,7 @@ namespace
         stream->_startPTS = getStreamStartTime(*stream);
         stream->_frames   = getStreamFrames(*stream);
         stream->_samples  = getStreamSamples(*stream);
+        stream->_bitsPerSample = getBitsPerSample(stream->_codecContext->sample_fmt);
         stream->_frame_size = stream->_codecContext->frame_size;
           
         // save the stream
@@ -401,14 +458,19 @@ namespace
 
         int firstFrame = floor((double)firstSample / stream->_frame_size);
         int lastFrame = floor((double)lastSample / stream->_frame_size);
+        int _ltrim = (firstSample - firstFrame * stream->_frame_size) * stream->_bitsPerSample / 8;
+        int _rtrim = (lastSample - lastFrame * stream->_frame_size) * stream->_bitsPerSample / 8;
 
-        for (int f = firstFrame; f <= lastFrame; f++)
+        for (int f = firstFrame; f < lastFrame ; f++)
         {
-            decode(f, init_playback, play, data, streamIdx);
+          int ltrim = (f == firstFrame) ? _ltrim : 0;
+          int rtrim = (f == lastFrame) ? _rtrim : 0;
+
+          decode(f, ltrim, rtrim, init_playback, play, data, streamIdx);
         }
     }
 
-    bool decode(unsigned frame, init_playback_callback init_playback, play_callback play, void * data, unsigned streamIdx = 0)
+    bool decode(unsigned frame, int ltrim, int rtrim, init_playback_callback init_playback, play_callback play, void * data, unsigned streamIdx = 0)
     {
       if (streamIdx >= _streams.size())
         return false;
@@ -482,7 +544,7 @@ namespace
 
       // Loop until the desired frame has been decoded. May also break from within loop on failure conditions where the
       // desired frame will never be decoded.
-      bool hasPicture = false;
+      bool hasFrame = false;
       do {
         bool decodeAttempted = false;
         int frameDecoded = 0;
@@ -591,26 +653,10 @@ namespace
         // If a frame was decoded, ...
         if (frameDecoded) {
 
-            {
-                int bits = -1;
-
-                switch(stream->_codecContext->sample_fmt){
-                    case AV_SAMPLE_FMT_U8:
-                    case AV_SAMPLE_FMT_U8P:
-                        bits = 8;
-                        break;
-                    case AV_SAMPLE_FMT_S16:
-                    case AV_SAMPLE_FMT_S16P:
-                        bits = 16;
-                        break;
-                    case AV_SAMPLE_FMT_S32:
-                    case AV_SAMPLE_FMT_S32P:
-                        bits = 32;
-                        break;
-                }
-
-                init_playback(bits, stream->_codecContext->channels, stream->_codecContext->sample_rate, data);
-            }
+          {
+            int bits = getBitsPerSample(stream->_codecContext->sample_fmt);
+            init_playback(bits, stream->_codecContext->channels, stream->_codecContext->sample_rate, data);
+          }
 
           // Now that we have had a frame decoded, we know that seek landed at a valid place to start decode. Any decode
           // stalls detected after this point will result in immediate decode failure.
@@ -619,13 +665,23 @@ namespace
           // If the frame just output from decode is the desired one, get the decoded picture from it and set that we
           // have a picture.
           if (stream->_decodeNextFrameOut == desiredFrame) {
+            int data_size = stream->_avFrame->linesize[0];
+            char * pbuf = (char *) stream->_avFrame->data[0];
 
-            int data_size = av_samples_get_buffer_size(NULL, stream->_codecContext->channels,
-                                                       stream->_avFrame->nb_samples,
-                                                       stream->_codecContext->sample_fmt, 1);
-            
-            play((char*)stream->_avFrame->data[0], data_size, data);
-            hasPicture = true;
+            if (stream->_codecContext->sample_fmt == AV_SAMPLE_FMT_FLTP) {
+              stream->_swr_buffer = (uint8_t*) realloc(stream->_swr_buffer, data_size);
+              int converted = swr_convert(stream->_swr, &stream->_swr_buffer, stream->_avFrame->nb_samples, (const uint8_t **) stream->_avFrame->extended_data, stream->_avFrame->nb_samples);   
+              if (converted >= 0) {
+                pbuf = (char*) stream->_swr_buffer;
+                data_size = converted * stream->_bitsPerSample / 8;
+              } else {
+                setError("Failed to cenvert data");
+                break;
+              }
+            }
+
+            play(pbuf + ltrim, data_size - ltrim - rtrim, data);
+            hasFrame = true;
           }
 
           // Advance next output frame expected from decode.
@@ -694,19 +750,19 @@ namespace
         }
 
         av_free_packet(&_avPacket);
-      } while (!hasPicture);
+      } while (!hasFrame);
 
 
       // If read failed, reset the next frame expected out so that we seek and restart decode on next read attempt. Also free
       // the AVPacket, since it won't have been freed at the end of the above loop (we reach here by a break from the main
-      // loop when hasPicture is false).
-      if (!hasPicture) {
+      // loop when hasFrame is false).
+      if (!hasFrame) {
         if (_avPacket.size > 0)
           av_free_packet(&_avPacket);
         stream->_decodeNextFrameOut = -1;
-      }
+      } 
 
-      return hasPicture;
+      return hasFrame;
     }
 
     // get stream information

@@ -15,6 +15,7 @@
         "type_traits": "cpp",
         "utility": "cpp",
         "cmath": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "os_types.h": "c"
     }
 }

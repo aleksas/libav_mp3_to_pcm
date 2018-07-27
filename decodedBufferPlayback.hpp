@@ -32,12 +32,7 @@ static void audio_decode_example(const char *filename, init_playback_callback in
     AVPacket avpkt;
     AVFrame *decoded_frame = NULL;
 
-    av_register_all();
-    ao_initialize(); 
-
-    int driver = ao_default_driver_id();
     bool firstFrame = true;
-    ao_device* device = NULL;
 
     av_init_packet(&avpkt);
 

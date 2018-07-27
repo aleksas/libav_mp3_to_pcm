@@ -1,3 +1,7 @@
+// Silent samples after seek in mp3: https://ffmpeg.org/pipermail/libav-user/2016-September/009608.html
+// Encode to m4a(AAC): ffmpeg -i Aiste.wav -c:a aac -b:a 28k -strict -2 Aiste.m4a
+// https://stackoverflow.com/questions/14989397/how-to-convert-sample-rate-from-av-sample-fmt-fltp-to-av-sample-fmt-s16
+
 #include "decodedBufferPlayback.hpp"
 #include "ffmpegReader.hpp"
 
@@ -32,6 +36,7 @@ void init(int bits, int channels, int sample_rate, void * data)
 
         // To initalize libao for playback
         pHandle->device = ao_open_live(pHandle->driver, &sample_format, NULL);
+        //pHandle->device = ao_open_file(pHandle->driver, "out.wav", true, &sample_format, NULL);
         if (!pHandle->device) die("Could not initialize output device");
     }
 }
@@ -73,7 +78,7 @@ int main(int argc, char* argv[])
                 file.info(frames, samples);
 
                 int frame = 2700;
-                while (file.decode(frame++, &init, &play, &handle))
+                while (file.decode(frame++, 0, 0, &init, &play, &handle))
                 {}
             }
             break;
@@ -83,7 +88,7 @@ int main(int argc, char* argv[])
 
                 int64_t frames, samples;
                 file.info(frames, samples);
-                file.decodeSamples(3200000, samples - 1, &init, &play, &handle);
+                file.decodeSamples(1748982, 1806075, &init, &play, &handle);
             }
             break;
     }
