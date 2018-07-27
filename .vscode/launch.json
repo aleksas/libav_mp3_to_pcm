@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/avcodec_mp3_to_pcm",
             "args": [
-                "2514.mp3"
+                "2514.m4a"
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

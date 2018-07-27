@@ -10,7 +10,7 @@
             "args": [
                 "-g", "read.cpp",
                 "-o", "avcodec_mp3_to_pcm",
-                "-lavformat", "-lavcodec", "-lavutil", "-lavutil", "-lao"
+                "-lavformat", "-lavcodec", "-lavutil", "-lswresample", "-lao"
             ],
             "group": {
                 "kind": "build",
