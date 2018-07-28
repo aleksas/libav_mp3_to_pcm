@@ -2,12 +2,16 @@
 // Encode to m4a(AAC): ffmpeg -i Aiste.wav -c:a aac -b:a 28k -strict -2 Aiste.m4a
 // https://stackoverflow.com/questions/14989397/how-to-convert-sample-rate-from-av-sample-fmt-fltp-to-av-sample-fmt-s16
 
-#include "decodedBufferPlayback.hpp"
-#include "ffmpegReader.hpp"
+
+typedef void (*init_playback_callback)(int bits, int channels, int sample_rate, void * callbackData);
+typedef void (*play_callback)(char * buffer, int bufferSize, void * callbackData);
 
 extern "C" {
+    #include <ao/ao.h>
     #include <stdio.h>
 }
+
+#include "ffmpegReader.hpp"
 
 typedef struct OutputHandle_ {
     int driver;
@@ -24,10 +28,10 @@ void die(const char* message)
     exit(1);
 }
 
-void init(int bits, int channels, int sample_rate, void * data)
+void init(int bits, int channels, int sample_rate, void * callbackData)
 {
-    OutputHandle * pHandle = (OutputHandle *) data;
-    if (!data) die("data null pointer passed to init.");
+    OutputHandle * pHandle = (OutputHandle *) callbackData;
+    if (!callbackData) die("data null pointer passed to init.");
 
     if (!pHandle->device)
     {
@@ -44,10 +48,10 @@ void init(int bits, int channels, int sample_rate, void * data)
     }
 }
 
-void play(char * buffer, int bufferSize, void * data)
+void play(char * buffer, int bufferSize, void * callbackData)
 {
-    OutputHandle * pHandle = (OutputHandle *) data;
-    if (!data) die("data null pointer passed to play.");
+    OutputHandle * pHandle = (OutputHandle *) callbackData;
+    if (!callbackData) die("data null pointer passed to play.");
 
     pHandle->buffer = (char*) realloc(pHandle->buffer, pHandle->signal_offset + bufferSize);
 
@@ -75,10 +79,8 @@ int main(int argc, char* argv[])
 
     int scenario = 3;
 
-    switch (scenario){
-        case 1:
-            audio_decode_example(input_filename, &init, &play, &handle); 
-            break;
+    switch (scenario)
+    {
         case 2:
             {
                 FFmpegFile file(input_filename);
@@ -86,18 +88,24 @@ int main(int argc, char* argv[])
                 int64_t frames, samplesPerFrame, bitsPerSample;
                 file.info(frames, samplesPerFrame, bitsPerSample);
 
-                int frame = 2700;
+                handle.buffer = (char*) realloc(handle.buffer, frames * samplesPerFrame * bitsPerSample / 8);
+
+                handle.signal_offset = 0;
+                int frame = 0;
                 while (file.decode(frame++, 0, 0, &init, &play, &handle))
                 {}
+
+                ao_play(handle.device, (char *) handle.buffer, handle.signal_offset);
             }
             break;
         case 3:
             {
                 FFmpegFile file(input_filename);
 
-                int64_t frames, samplesPerFrame, bitsPerSample, Bps;
+                int64_t frames, samplesPerFrame, bitsPerSample;
                 file.info(frames, samplesPerFrame, bitsPerSample);
-                Bps = bitsPerSample / 8;
+
+                handle.buffer = (char*) realloc(handle.buffer, frames * samplesPerFrame * bitsPerSample / 8);
 
                 handle.signal_offset = 0;
 
@@ -105,7 +113,7 @@ int main(int argc, char* argv[])
                 file.decodeSamples(290000, 380000, &init, &play, &handle);
                 file.decodeSamples(95000, 170000, &init, &play, &handle);
 
-                play((char *) handle.buffer, handle.signal_offset, &handle);
+                ao_play(handle.device, (char *) handle.buffer, handle.signal_offset);
             }
             break;
     }
