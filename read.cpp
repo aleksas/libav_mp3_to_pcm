@@ -18,8 +18,7 @@ typedef struct OutputHandle_ {
     ao_device* device;
 
     // Alt scenario when we save audio to mem instead of playing it
-    char * buffer;
-    uint64_t signal_offset;
+    int8_t * buffer;
 } OutputHandle;
 
 void die(const char* message)
@@ -48,20 +47,6 @@ void init(int bits, int channels, int sample_rate, void * callbackData)
     }
 }
 
-void play(char * buffer, int bufferSize, void * callbackData)
-{
-    OutputHandle * pHandle = (OutputHandle *) callbackData;
-    if (!callbackData) die("data null pointer passed to play.");
-
-    pHandle->buffer = (char*) realloc(pHandle->buffer, pHandle->signal_offset + bufferSize);
-
-    memcpy(pHandle->buffer + pHandle->signal_offset, buffer, bufferSize);
-    pHandle->signal_offset += bufferSize;
-
-    // Send the buffer contents to the audio device
-    ao_play(pHandle->device, buffer, bufferSize);
-}
-
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
@@ -85,35 +70,50 @@ int main(int argc, char* argv[])
             {
                 FFmpegFile file(input_filename);
                 
-                int64_t frames, samplesPerFrame, bitsPerSample;
-                file.info(frames, samplesPerFrame, bitsPerSample);
+                int64_t frames, samplesPerFrame, bitsPerSample, bufferSize, bytesWritten = 0, _bytesWritten;
+                int channels, sampleRate;
+                file.info(frames, samplesPerFrame, bitsPerSample, channels, sampleRate);
 
-                handle.buffer = (char*) realloc(handle.buffer, frames * samplesPerFrame * bitsPerSample / 8);
+                bufferSize = frames * samplesPerFrame * bitsPerSample / 8;
 
-                handle.signal_offset = 0;
+                handle.buffer = (int8_t*) realloc(handle.buffer, bufferSize);
+
+                init(bitsPerSample, channels, sampleRate, &handle);
+
                 int frame = 0;
-                while (file.decode(frame++, 0, 0, &init, &play, &handle))
-                {}
+                do 
+                {
+                    _bytesWritten = file.decode(frame++, 0, 0, handle.buffer + bytesWritten, bufferSize - bytesWritten);
+                    bytesWritten += _bytesWritten;
+                } while(_bytesWritten >= 0);
 
-                ao_play(handle.device, (char *) handle.buffer, handle.signal_offset);
+                ao_play(handle.device, (char *) handle.buffer, bytesWritten);
             }
             break;
         case 3:
             {
                 FFmpegFile file(input_filename);
 
-                int64_t frames, samplesPerFrame, bitsPerSample;
-                file.info(frames, samplesPerFrame, bitsPerSample);
+                int64_t frames, samplesPerFrame, bitsPerSample, bufferSize, bytesWritten = 0, _bytesWritten;
+                int channels, sampleRate;
+                file.info(frames, samplesPerFrame, bitsPerSample, channels, sampleRate);
 
-                handle.buffer = (char*) realloc(handle.buffer, frames * samplesPerFrame * bitsPerSample / 8);
+                bufferSize = frames * samplesPerFrame * bitsPerSample / 8;
 
-                handle.signal_offset = 0;
+                handle.buffer = (int8_t*) realloc(handle.buffer, bufferSize);
 
-                file.decodeSamples(1010000, 1080000, &init, &play, &handle);
-                file.decodeSamples(290000, 380000, &init, &play, &handle);
-                file.decodeSamples(95000, 170000, &init, &play, &handle);
+                init(bitsPerSample, channels, sampleRate, &handle);
 
-                ao_play(handle.device, (char *) handle.buffer, handle.signal_offset);
+                _bytesWritten = file.decodeSamples(1010000, 70000, handle.buffer + bytesWritten, bufferSize - bytesWritten);
+                bytesWritten += _bytesWritten;
+
+                _bytesWritten = file.decodeSamples(290000, 90000, handle.buffer + bytesWritten, bufferSize - bytesWritten);
+                bytesWritten += _bytesWritten;
+
+                _bytesWritten = file.decodeSamples(95000, 75000, handle.buffer + bytesWritten, bufferSize - bytesWritten);
+                bytesWritten += _bytesWritten;
+
+                ao_play(handle.device, (char *) handle.buffer, bytesWritten);
             }
             break;
     }

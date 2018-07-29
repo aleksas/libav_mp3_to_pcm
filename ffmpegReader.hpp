@@ -448,8 +448,11 @@ namespace
       return _streams.size();
     }
 
-    bool decodeSamples(int64_t firstSample, int64_t lastSample, init_playback_callback init_playback, play_callback play, void * data, unsigned streamIdx = 0)
+    int64_t decodeSamples(int64_t firstSample, int64_t sampleCount, int8_t * pBuffer, int64_t bufferSize, unsigned streamIdx = 0)
     {
+        int64_t bytesWritten = 0;
+        int64_t lastSample = firstSample + sampleCount;
+
         Stream* stream = _streams[streamIdx];
 
         if (streamIdx >= _streams.size()) return false;
@@ -463,17 +466,31 @@ namespace
 
         for (int f = firstFrame; f < lastFrame ; f++)
         {
+          int64_t _bytesWritten = 0;
+
           int ltrim = (f == firstFrame) ? _ltrim : 0;
           int rtrim = (f == lastFrame) ? _rtrim : 0;
 
-          decode(f, ltrim, rtrim, init_playback, play, data, streamIdx);
+          _bytesWritten = decode(f, ltrim, rtrim, pBuffer + bytesWritten, bufferSize - bytesWritten);
+          
+          if (_bytesWritten >= 0) {
+            bytesWritten += _bytesWritten;      
+          } else {
+            return _bytesWritten;
+          }
         }
+
+        return bytesWritten;
     }
 
-    bool decode(unsigned frame, int ltrim, int rtrim, init_playback_callback init_playback, play_callback play, void * data, unsigned streamIdx = 0)
+    // return number if bytes written 
+    int decode(unsigned frame, int ltrim, int rtrim, int8_t * pBuffer, int64_t bufferSize, unsigned streamIdx = 0)
     {
       if (streamIdx >= _streams.size())
-        return false;
+        return -1;
+
+      if (pBuffer == NULL)
+        return -2;
 
       // get the stream
       Stream* stream = _streams[streamIdx];
@@ -483,7 +500,7 @@ namespace
 
       // Early-out if out-of-range frame requested.
       if (desiredFrame < 0 || desiredFrame >= stream->_frames)
-        return false;
+        return -3;
 
 
       // Number of read retries remaining when decode stall is detected before we give up (in the case of post-seek stalls,
@@ -520,6 +537,8 @@ namespace
       int lastSeekedFrame = -1; // 0-based index of the last frame to which we seeked when seek in progress / negative when no
                                 // seek in progress,
 
+      int64_t bytesWritten = 0;
+
       if (desiredFrame != stream->_decodeNextFrameOut) {
 
         lastSeekedFrame = desiredFrame;
@@ -533,7 +552,7 @@ namespace
         if (error < 0) {
           // Seek error. Abort attempt to read and decode frames.
           setInternalError(error, "FFmpeg Reader failed to seek frame: ");
-          return false;
+          return -4;
         }
       }
 
@@ -652,12 +671,6 @@ namespace
 
         // If a frame was decoded, ...
         if (frameDecoded) {
-
-          {
-            int bits = getBitsPerSample(stream->_codecContext->sample_fmt);
-            init_playback(bits, stream->_codecContext->channels, stream->_codecContext->sample_rate, data);
-          }
-
           // Now that we have had a frame decoded, we know that seek landed at a valid place to start decode. Any decode
           // stalls detected after this point will result in immediate decode failure.
           awaitingFirstDecodeAfterSeek = false;
@@ -680,7 +693,14 @@ namespace
               }
             }
 
-            play(pbuf + ltrim, data_size - ltrim - rtrim, data);
+            if (bufferSize < data_size - ltrim - rtrim) 
+            {
+                setError("Buffer size too small.");
+                return -5;
+            } 
+
+            memcpy(pBuffer, pbuf + ltrim, data_size - ltrim - rtrim);
+            bytesWritten += data_size - ltrim - rtrim;
             hasFrame = true;
           }
 
@@ -762,11 +782,11 @@ namespace
         stream->_decodeNextFrameOut = -1;
       } 
 
-      return hasFrame;
+      return bytesWritten;
     }
 
     // get stream information
-    bool info( int64_t & frames, int64_t & samplesPerFrame, int64_t & bitsPerSample, unsigned streamIdx = 0)
+    bool info( int64_t & frames, int64_t & samplesPerFrame, int64_t & bitsPerSample, int & channels, int & sampleRate, unsigned streamIdx = 0)
     {
         if (streamIdx >= _streams.size())
             return false;
@@ -776,6 +796,8 @@ namespace
         frames = stream->_frames;
         samplesPerFrame = stream->_frame_size;
         bitsPerSample = stream->_bitsPerSample;
+        channels = stream->_codecContext->channels;
+        sampleRate = stream->_codecContext->sample_rate;
 
         return true;
     }
